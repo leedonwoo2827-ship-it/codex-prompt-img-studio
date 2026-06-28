@@ -1,0 +1,504 @@
+// app.js — 메인 컨트롤러 (사이드바 / 스튜디오 / 에디터 / 병합 / 설정)
+import { api } from "/js/api.js";
+
+const $ = (id) => document.getElementById(id);
+const state = {
+  view: "all",        // "all" | "fav" | <projectId>
+  projects: [],
+  images: [],
+  current: null,      // 선택된 이미지 상세
+  settings: {},
+};
+
+// ── 공통 UI ────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, bad = false) {
+  const t = $("toast");
+  t.innerHTML = msg;
+  t.className = "toast" + (bad ? " bad" : "");
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), bad ? 6000 : 2600);
+}
+function busy(btn, on, label) {
+  if (on) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> ${label || "생성 중…"}`; }
+  else { btn.disabled = false; btn.textContent = btn.dataset.label || btn.textContent; }
+}
+
+// ── 설정 / 크기 선택 ───────────────────────────────────────
+const SIZE_LABELS = {
+  "auto": "자동",
+  "1024x1024": "1024×1024 (1:1 정사각)",
+  "1536x1024": "1536×1024 (3:2 가로)",
+  "1024x1536": "1024×1536 (2:3 세로)",
+};
+function fillSizeSelect(sel, sizes, val) {
+  sel.innerHTML = "";
+  sizes.forEach((s) => {
+    const o = document.createElement("option");
+    o.value = s; o.textContent = SIZE_LABELS[s] || s;
+    if (s === val) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+async function loadSettings() {
+  state.settings = await api.getSettings();
+  const sizes = state.settings.size_choices || ["auto"];
+  fillSizeSelect($("sizeSelect"), sizes, state.settings.default_size);
+  fillSizeSelect($("defSizeSelect"), sizes, state.settings.default_size);
+}
+
+async function refreshAuthChip() {
+  try {
+    const s = await api.authStatus();
+    const chip = $("authChip");
+    if (s.engine === "gemini") {
+      chip.textContent = "엔진: Gemini" + (s.ready ? " ✓" : " (키 필요)");
+      chip.className = "auth-chip " + (s.ready ? "ok" : "bad");
+    } else if (!s.installed) {
+      chip.textContent = "codex 미설치"; chip.className = "auth-chip bad";
+    } else if (!s.authenticated) {
+      chip.textContent = "ChatGPT 로그인 필요"; chip.className = "auth-chip bad";
+    } else {
+      chip.textContent = (s.email || "ChatGPT") + " ✓"; chip.className = "auth-chip ok";
+    }
+    return s;
+  } catch { return null; }
+}
+
+// ── 사이드바 (프로젝트) ────────────────────────────────────
+async function loadProjects() {
+  state.projects = await api.listProjects();
+  renderProjects();
+}
+function renderProjects() {
+  const list = $("projList");
+  // 고정 항목 2개는 유지, 나머지 제거
+  [...list.querySelectorAll(".proj-item.user")].forEach((n) => n.remove());
+  state.projects.forEach((p) => {
+    const div = document.createElement("div");
+    div.className = "proj-item user" + (String(state.view) === String(p.id) ? " active" : "");
+    div.dataset.pid = p.id;
+    div.innerHTML = `<span class="proj-name">📂 ${escapeHtml(p.name)}</span>
+      <span class="proj-actions">
+        <span class="proj-badge">${p.count}</span>
+        <button class="icon-btn" data-act="rename" title="이름변경">✎</button>
+        <button class="icon-btn" data-act="del" title="삭제">🗑</button>
+      </span>`;
+    div.addEventListener("click", (e) => {
+      const act = e.target.dataset?.act;
+      if (act === "rename") { e.stopPropagation(); renameProject(p); }
+      else if (act === "del") { e.stopPropagation(); delProject(p); }
+      else selectView(p.id);
+    });
+    list.appendChild(div);
+  });
+  // 고정 항목 active 표시 갱신
+  list.querySelectorAll(".proj-item:not(.user)").forEach((n) => {
+    n.classList.toggle("active", n.dataset.pid === String(state.view));
+  });
+}
+async function renameProject(p) {
+  const name = prompt("리스트 이름", p.name);
+  if (name == null) return;
+  await api.renameProject(p.id, name);
+  await loadProjects();
+}
+async function delProject(p) {
+  if (!confirm(`'${p.name}' 리스트를 삭제할까요? (이미지는 전체 보관함에 남습니다)`)) return;
+  await api.deleteProject(p.id);
+  if (String(state.view) === String(p.id)) state.view = "all";
+  await loadProjects(); await loadImages();
+}
+
+function selectView(pid) {
+  state.view = pid;
+  backToGallery();
+  renderProjects();
+  const titles = { all: "전체 이미지", fav: "⭐ 즐겨찾기" };
+  const p = state.projects.find((x) => String(x.id) === String(pid));
+  $("viewTitle").textContent = titles[pid] || (p ? `📂 ${p.name}` : "이미지");
+  loadImages();
+}
+
+// ── 갤러리 (스튜디오) ──────────────────────────────────────
+async function loadImages() {
+  const params = {};
+  if (state.view === "fav") params.favorite = true;
+  else if (state.view !== "all") params.project_id = state.view;
+  state.images = await api.listImages(params);
+  renderGallery();
+}
+function renderGallery() {
+  const g = $("gallery");
+  if (!state.images.length) {
+    g.innerHTML = `<div class="empty">아직 이미지가 없습니다.<br>아래 입력창에 설명을 적고 <b>생성</b>을 눌러보세요.</div>`;
+    return;
+  }
+  g.innerHTML = "";
+  state.images.forEach((img) => {
+    const c = document.createElement("div");
+    c.className = "card";
+    const tag = { generate: "생성", edit: "수정", merge: "병합" }[img.kind] || "";
+    c.innerHTML = `<img loading="lazy" src="${img.url}" alt="">
+      <span class="tag">${tag}</span>${img.favorite ? '<span class="fav">⭐</span>' : ""}`;
+    c.addEventListener("click", () => openImage(img.id));
+    g.appendChild(c);
+  });
+}
+
+// ── 단일 뷰어 + 에디터 ─────────────────────────────────────
+async function openImage(id) {
+  state.current = await api.getImage(id);
+  $("gallery").hidden = true;
+  $("viewer").hidden = false;
+  $("headActions").hidden = false;
+  $("viewTitle").textContent = ({ generate: "생성", edit: "수정", merge: "병합" }[state.current.kind] || "이미지") + ` #${id}`;
+  $("viewerImg").src = state.current.url + "?t=" + Date.now();
+  $("downloadBtn").href = state.current.url;
+  $("downloadBtn").setAttribute("download", `image-${id}.png`);
+  $("favBtn").textContent = state.current.favorite ? "⭐ 즐겨찾기됨" : "⭐ 즐겨찾기";
+  $("editInstruction").value = "";
+  resetMask();
+  renderLineage();
+}
+function renderLineage() {
+  const box = $("lineage");
+  box.innerHTML = "";
+  (state.current.lineage || []).forEach((n) => {
+    const im = document.createElement("img");
+    im.src = n.url; im.title = n.prompt || "";
+    if (n.id === state.current.id) im.className = "cur";
+    im.addEventListener("click", () => openImage(n.id));
+    box.appendChild(im);
+  });
+}
+function backToGallery() {
+  state.current = null;
+  $("viewer").hidden = true;
+  $("gallery").hidden = false;
+  $("headActions").hidden = true;
+}
+
+async function generate() {
+  const prompt = $("promptInput").value.trim();
+  if (!prompt) return;
+  const btn = $("sendBtn");
+  busy(btn, true);
+  try {
+    const img = await api.generate({
+      prompt, size: $("sizeSelect").value,
+      project_id: typeof state.view === "number" || /^\d+$/.test(state.view) ? Number(state.view) : null,
+    });
+    $("promptInput").value = ""; autoGrow($("promptInput"));
+    toast("이미지를 생성했습니다 ✓");
+    await loadProjects();
+    if (state.current) backToGallery();
+    await loadImages();
+    openImage(img.id);
+  } catch (e) { toast(errMsg(e), true); }
+  finally { busy(btn, false); }
+}
+
+async function applyEdit() {
+  if (!state.current) return;
+  const instruction = $("editInstruction").value.trim();
+  if (!instruction) { toast("수정 지시문을 입력하세요.", true); return; }
+  const btn = $("applyEditBtn");
+  busy(btn, true);
+  try {
+    const body = { instruction, size: state.current.size };
+    if ($("maskToggle").checked && hasMaskStrokes()) {
+      body.type = "mask";
+      body.mask_image = buildMaskComposite();
+    } else {
+      body.type = "nl";
+    }
+    const img = await api.edit(state.current.id, body);
+    toast("수정본을 생성했습니다 ✓");
+    await loadImages();
+    openImage(img.id);
+  } catch (e) { toast(errMsg(e), true); }
+  finally { busy(btn, false); }
+}
+
+// ── 마스크 그리기 ──────────────────────────────────────────
+let drawing = false, strokes = false;
+const canvas = $("maskCanvas"), cctx = canvas.getContext("2d");
+
+function syncMaskCanvas() {
+  const img = $("viewerImg");
+  const wrap = $("canvasWrap");
+  const r = img.getBoundingClientRect();
+  const wr = wrap.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(r.width));
+  canvas.height = Math.max(1, Math.round(r.height));
+  canvas.style.left = (r.left - wr.left + wrap.scrollLeft) + "px";
+  canvas.style.top = (r.top - wr.top + wrap.scrollTop) + "px";
+  canvas.style.width = r.width + "px";
+  canvas.style.height = r.height + "px";
+}
+function resetMask() {
+  $("maskToggle").checked = false;
+  $("maskTools").hidden = true; $("maskHint").hidden = true;
+  canvas.style.display = "none";
+  cctx.clearRect(0, 0, canvas.width, canvas.height);
+  strokes = false;
+}
+function clearMask() { cctx.clearRect(0, 0, canvas.width, canvas.height); strokes = false; }
+function hasMaskStrokes() { return strokes; }
+function paintAt(e) {
+  const r = canvas.getBoundingClientRect();
+  const x = (e.clientX - r.left) * (canvas.width / r.width);
+  const y = (e.clientY - r.top) * (canvas.height / r.height);
+  cctx.fillStyle = "rgba(255,46,46,0.55)";
+  cctx.beginPath();
+  cctx.arc(x, y, Number($("brushSize").value) / 2, 0, Math.PI * 2);
+  cctx.fill();
+  strokes = true;
+}
+function buildMaskComposite() {
+  // 원본(자연 해상도) 위에 칠한 영역을 강조해 합성한 PNG data URL.
+  const img = $("viewerImg");
+  const off = document.createElement("canvas");
+  off.width = img.naturalWidth || canvas.width;
+  off.height = img.naturalHeight || canvas.height;
+  const o = off.getContext("2d");
+  o.drawImage(img, 0, 0, off.width, off.height);
+  o.drawImage(canvas, 0, 0, off.width, off.height);
+  return off.toDataURL("image/png");
+}
+
+// ── 병합 모달 ──────────────────────────────────────────────
+let mergeSel = [];
+let mergeUploads = []; // PC에서 추가한 이미지(data URL 문자열)
+function openMerge() {
+  mergeSel = [];
+  mergeUploads = [];
+  renderUploads();
+  const picker = $("mergePicker");
+  picker.innerHTML = "";
+  state.images.forEach((img) => {
+    const d = document.createElement("div");
+    d.className = "pick"; d.dataset.id = img.id;
+    d.innerHTML = `<img src="${img.url}"><span class="order"></span>`;
+    d.addEventListener("click", () => {
+      const i = mergeSel.indexOf(img.id);
+      if (i >= 0) mergeSel.splice(i, 1); else mergeSel.push(img.id);
+      d.classList.toggle("sel", mergeSel.includes(img.id));
+      refreshMergeOrders();
+    });
+    picker.appendChild(d);
+  });
+  // 현재 보고 있는 이미지를 기본 선택
+  if (state.current) {
+    mergeSel = [state.current.id];
+    const d = picker.querySelector(`.pick[data-id="${state.current.id}"]`);
+    if (d) d.classList.add("sel");
+  }
+  refreshMergeOrders();
+  $("mergePrompt").value = "";
+  $("mergeModal").hidden = false;
+}
+function refreshMergeOrders() {
+  $("mergePicker").querySelectorAll(".pick").forEach((d) => {
+    const idx = mergeSel.indexOf(Number(d.dataset.id));
+    d.querySelector(".order").textContent = idx >= 0 ? idx + 1 : "";
+  });
+  $("mergeCount").textContent =
+    "선택: " + mergeSel.length + (mergeUploads.length ? ` · PC ${mergeUploads.length}` : "");
+}
+
+// PC에서 추가한 이미지: 스튜디오 선택(파란 번호 뱃지)과 다르게 오렌지 'PC' 뱃지 + 제거 버튼으로 표식
+function renderUploads() {
+  const list = $("mergeUploadList");
+  if (!list) return;
+  list.innerHTML = "";
+  list.hidden = mergeUploads.length === 0;
+  mergeUploads.forEach((url, i) => {
+    const d = document.createElement("div");
+    d.className = "pick upload";
+    d.innerHTML = `<img src="${url}"><span class="badge-pc">PC</span><button class="rm" title="제거">✕</button>`;
+    d.querySelector(".rm").addEventListener("click", () => {
+      mergeUploads.splice(i, 1);
+      renderUploads();
+      refreshMergeOrders();
+    });
+    list.appendChild(d);
+  });
+}
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error("파일 읽기 실패"));
+    fr.readAsDataURL(file);
+  });
+}
+async function handleMergeFiles(fileList) {
+  const files = Array.from(fileList || []).filter((f) => f.type.startsWith("image/"));
+  if (!files.length) return;
+  for (const f of files) {
+    try { mergeUploads.push(await readFileAsDataURL(f)); }
+    catch { toast(`${f.name} 읽기 실패`, true); }
+  }
+  renderUploads();
+  refreshMergeOrders();
+}
+async function runMerge() {
+  const prompt = $("mergePrompt").value.trim();
+  if (!prompt) { toast("병합 지시문을 입력하세요.", true); return; }
+  if (!mergeSel.length && !mergeUploads.length) {
+    toast("이미지를 1장 이상 선택하거나 PC에서 추가하세요.", true); return;
+  }
+  const btn = $("mergeRun");
+  busy(btn, true);
+  try {
+    const img = await api.compose({
+      prompt, source_ids: mergeSel, extra_images: mergeUploads,
+      project_id: /^\d+$/.test(state.view) ? Number(state.view) : null,
+    });
+    $("mergeModal").hidden = true;
+    toast("병합 이미지를 생성했습니다 ✓");
+    await loadImages();
+    openImage(img.id);
+  } catch (e) { toast(errMsg(e), true); }
+  finally { busy(btn, false); }
+}
+
+// ── 설정 모달 ──────────────────────────────────────────────
+async function openSettings() {
+  const s = state.settings;
+  $("engineSelect").value = s.engine || "codex";
+  fillSizeSelect($("defSizeSelect"), s.size_choices || ["auto"], s.default_size);
+  $("geminiFields").hidden = s.engine !== "gemini";
+  $("geminiKey").value = "";
+  $("geminiKey").placeholder = s.gemini_api_key_set ? "저장됨 (" + s.gemini_api_key + ") — 변경 시 입력" : "AI Studio 무료 키";
+  const st = await refreshAuthChip();
+  $("authStatus").innerHTML = authStatusHtml(st);
+  $("settingsMsg").textContent = "";
+  $("settingsModal").hidden = false;
+}
+function authStatusHtml(s) {
+  if (!s) return "상태 확인 실패";
+  if (s.engine === "gemini")
+    return s.ready ? "✅ Gemini 엔진 — 키 설정됨" : "⚠️ Gemini 키가 필요합니다 (아래 입력).";
+  if (!s.installed) return "❌ codex CLI 미설치 — <code>npm i -g @openai/codex</code> 후 <code>codex login</code>";
+  if (!s.authenticated) return "⚠️ ChatGPT 미로그인 — 터미널에서 <code>codex login</code> 실행";
+  return `✅ ChatGPT 로그인됨${s.email ? " — " + s.email : ""} (키 없이 구독 할당량 사용)`;
+}
+async function saveSettings() {
+  const patch = {
+    engine: $("engineSelect").value,
+    default_size: $("defSizeSelect").value,
+  };
+  const key = $("geminiKey").value.trim();
+  if (key) patch.gemini_api_key = key;
+  const btn = $("settingsSave");
+  busy(btn, true, "저장 중…");
+  try {
+    state.settings = await api.saveSettings(patch);
+    try { fillSizeSelect($("sizeSelect"), state.settings.size_choices, state.settings.default_size); } catch {}
+    $("settingsModal").hidden = true;      // 저장 즉시 닫기
+    toast("설정을 저장했습니다 ✓");
+    refreshAuthChip();                      // 비차단 갱신
+    loadImages();
+  } catch (e) {
+    $("settingsMsg").textContent = errMsg(e);
+  } finally { busy(btn, false); }
+}
+
+// ── 유틸 ───────────────────────────────────────────────────
+function escapeHtml(s) { return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function errMsg(e) {
+  if (e.status === 401) return "로그인이 필요합니다 — 터미널에서 <b>codex login</b> 후 다시 시도하세요.";
+  return e.message || "오류가 발생했습니다.";
+}
+function autoGrow(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 160) + "px"; }
+
+// ── 이벤트 바인딩 ──────────────────────────────────────────
+function wire() {
+  $("collapseBtn").addEventListener("click", () => $("app").classList.toggle("collapsed"));
+  $("expandBtn").addEventListener("click", () => $("app").classList.remove("collapsed"));
+  $("newProjectBtn").addEventListener("click", async () => {
+    const name = prompt("새 리스트 이름", "새 리스트");
+    if (name == null) return;
+    const p = await api.createProject(name);
+    await loadProjects(); selectView(p.id);
+  });
+  document.querySelectorAll('.proj-item:not(.user)').forEach((n) =>
+    n.addEventListener("click", () => selectView(n.dataset.pid)));
+
+  // 입력창
+  const pi = $("promptInput");
+  pi.addEventListener("input", () => autoGrow(pi));
+  pi.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generate(); }
+  });
+  $("sendBtn").addEventListener("click", generate);
+  $("sizeSelect").addEventListener("change", () => {});
+
+  // 뷰어/에디터
+  $("backToGallery").addEventListener("click", backToGallery);
+  $("applyEditBtn").addEventListener("click", applyEdit);
+  $("favBtn").addEventListener("click", async () => {
+    if (!state.current) return;
+    const r = await api.favorite(state.current.id);
+    state.current.favorite = r.favorite;
+    $("favBtn").textContent = r.favorite ? "⭐ 즐겨찾기됨" : "⭐ 즐겨찾기";
+    loadImages();
+  });
+  $("deleteBtn").addEventListener("click", async () => {
+    if (!state.current || !confirm("이 이미지를 삭제할까요?")) return;
+    await api.remove(state.current.id);
+    backToGallery(); loadProjects(); loadImages();
+    toast("삭제했습니다");
+  });
+
+  // 마스크
+  $("maskToggle").addEventListener("change", (e) => {
+    const on = e.target.checked;
+    $("maskTools").hidden = !on; $("maskHint").hidden = !on;
+    canvas.style.display = on ? "block" : "none";
+    if (on) syncMaskCanvas();
+  });
+  $("clearMask").addEventListener("click", clearMask);
+  canvas.addEventListener("pointerdown", (e) => { drawing = true; canvas.setPointerCapture(e.pointerId); paintAt(e); });
+  canvas.addEventListener("pointermove", (e) => { if (drawing) paintAt(e); });
+  canvas.addEventListener("pointerup", () => (drawing = false));
+  window.addEventListener("resize", () => { if ($("maskToggle").checked) syncMaskCanvas(); });
+
+  // 병합
+  $("plusBtn").addEventListener("click", openMerge);
+  $("mergeClose").addEventListener("click", () => ($("mergeModal").hidden = true));
+  $("mergeRun").addEventListener("click", runMerge);
+  $("mergeUploadBtn").addEventListener("click", () => $("mergeFileInput").click());
+  $("mergeFileInput").addEventListener("change", (e) => {
+    handleMergeFiles(e.target.files);
+    e.target.value = ""; // 같은 파일 다시 선택 가능하도록 초기화
+  });
+
+  // 매뉴얼 (새 탭)
+  $("manualBtn").addEventListener("click", () => window.open("/manual.html", "_blank"));
+
+  // 설정
+  $("settingsBtn").addEventListener("click", openSettings);
+  $("settingsClose").addEventListener("click", () => ($("settingsModal").hidden = true));
+  $("settingsSave").addEventListener("click", saveSettings);
+  $("engineSelect").addEventListener("change", (e) => {
+    $("geminiFields").hidden = e.target.value !== "gemini";
+  });
+
+  // 모달 바깥 클릭 닫기
+  document.querySelectorAll(".modal").forEach((m) =>
+    m.addEventListener("click", (e) => { if (e.target === m) m.hidden = true; }));
+}
+
+// ── 시작 ───────────────────────────────────────────────────
+(async function init() {
+  wire();
+  await loadSettings();
+  await refreshAuthChip();
+  await loadProjects();
+  await loadImages();
+})();

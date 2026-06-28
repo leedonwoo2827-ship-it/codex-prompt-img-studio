@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+SQLAlchemy>=2.0
+httpx
+python-dotenv
+python-multipart
+pypdf>=4.0
