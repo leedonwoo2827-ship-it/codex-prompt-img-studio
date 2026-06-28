@@ -46,5 +46,6 @@ data/                        # 런타임 (app.db · images/ · settings.json · 
 
 ## 디자인
 
-`_context/miro-design.md` 의 Miro 디자인 토큰(색/타이포/필 버튼/카드/라운드/엘리베이션)을
-작업 도구 UI 에 적용했습니다. Roobert PRO 는 비공개 폰트라 한글 지원이 우수한 Pretendard 로 대체했습니다.
+UI 는 **Miro 스타일**의 디자인 토큰(색 팔레트, 타이포, 필(pill) 버튼, 카드, 라운드, 엘리베이션)을
+작업 도구 화면에 적용해 SaaS 등급으로 마감했습니다. (디자인 스펙 원본은 저장소에 포함하지 않습니다.)
+Roobert PRO 는 비공개 폰트라 한글 지원이 우수한 Pretendard 로 대체했습니다.

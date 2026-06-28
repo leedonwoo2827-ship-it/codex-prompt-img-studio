@@ -402,6 +402,40 @@ input[type="text"]:focus, input[type="password"]:focus, .gen-field textarea:focu
 .ok { color: var(--success); }
 .fail { color: var(--error-text); }
 
+/* ── 로그인/계정 버튼 (설정 모달) ──────────────────────────── */
+.auth-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── 프롬프트 큐 바 (스튜디오) ─────────────────────────────── */
+.queue-bar {
+  display: flex; align-items: center; gap: var(--sp-sm); flex-wrap: wrap;
+  padding: var(--sp-sm) var(--sp-xl);
+  background: var(--surface-featured); border-top: 1px solid var(--hairline);
+  font-size: 13px; color: var(--ink);
+}
+.queue-bar[hidden] { display: none; }
+.queue-bar .q-icon { font-size: 15px; }
+.queue-bar .q-count { font-weight: 600; color: var(--ink-deep); white-space: nowrap; }
+.queue-bar .q-current { color: var(--slate); flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-bar .q-actions { display: flex; gap: 6px; margin-left: auto; }
+.queue-bar .ghost-btn { padding: 6px 12px; font-size: 12px; }
+
+/* ── 보관함 가져오기 모달 ──────────────────────────────────── */
+.arch-split { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--slate); font-weight: 500; }
+.arch-pick-list { display: flex; flex-direction: column; gap: 6px; max-height: 48vh; overflow-y: auto; }
+.arch-pick-item {
+  display: grid; grid-template-columns: auto 1.3fr 1fr 2fr; gap: 10px; align-items: center;
+  padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--r-md);
+  background: var(--canvas); cursor: pointer; transition: var(--transition);
+}
+.arch-pick-item:hover { border-color: var(--brand-blue); background: var(--surface-soft); }
+.arch-pick-item .api-title { font-weight: 600; color: var(--ink); }
+.arch-pick-item .api-meta { font-size: 12px; color: var(--stone); }
+.arch-pick-item .api-prev { font-size: 12px; color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 767px) {
+  .arch-pick-item { grid-template-columns: auto 1fr; }
+  .arch-pick-item .api-meta, .arch-pick-item .api-prev { display: none; }
+}
+
 /* ════════════════════════════════════════════════════════════
    반응형
    ════════════════════════════════════════════════════════════ */

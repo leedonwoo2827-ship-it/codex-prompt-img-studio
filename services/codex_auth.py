@@ -113,6 +113,31 @@ def login_terminal_cmd() -> List[str]:
     return [codex_path() or CODEX_BIN, "login"]
 
 
+def logout_terminal_cmd() -> List[str]:
+    return [codex_path() or CODEX_BIN, "logout"]
+
+
+def launch_console(args: List[str]) -> dict:
+    """새 콘솔 창에서 codex 명령을 실행한다(로그인=계정변경 / 로그아웃).
+
+    Windows 는 CREATE_NEW_CONSOLE 로 별도 cmd 창을 띄우고 `/k` 로 창을 유지한다
+    (로그인은 브라우저를 열고 사용자 입력을 기다리므로 창이 보여야 한다).
+    """
+    import subprocess
+    import sys
+    try:
+        if sys.platform == "win32":
+            CREATE_NEW_CONSOLE = 0x00000010
+            subprocess.Popen(["cmd", "/k"] + args, creationflags=CREATE_NEW_CONSOLE)
+        else:
+            subprocess.Popen(args)
+        return {"ok": True}
+    except FileNotFoundError:
+        return {"ok": False, "error": "codex CLI 를 찾을 수 없습니다. `npm i -g @openai/codex` 후 다시 시도하세요."}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
 def status() -> dict:
     installed = is_installed()
     authed = has_token()

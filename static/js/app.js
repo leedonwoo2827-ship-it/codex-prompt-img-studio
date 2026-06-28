@@ -8,6 +8,8 @@ const state = {
   images: [],
   current: null,      // 선택된 이미지 상세
   settings: {},
+  queue: [],          // 보관함에서 가져온 프롬프트 대기열
+  qi: 0,              // 현재 큐 위치
 };
 
 // ── 공통 UI ────────────────────────────────────────────────
@@ -196,8 +198,118 @@ async function generate() {
     if (state.current) backToGallery();
     await loadImages();
     openImage(img.id);
+    advanceQueueAfterGenerate();   // 큐가 있으면 다음 프롬프트 자동 입력
   } catch (e) { toast(errMsg(e), true); }
   finally { busy(btn, false); }
+}
+
+// ── 프롬프트 큐 (보관함 → 한 장씩 자동 입력) ───────────────
+function splitPromptBlocks(content, split) {
+  if (!split) return [String(content || "").trim()].filter(Boolean);
+  const blocks = [];
+  String(content || "").split(/```/).forEach((part, i) => {
+    if (i % 2 === 1) {
+      const b = (/^\w+\n/.test(part) ? part.replace(/^\w+\n/, "") : part).trim();
+      if (b) blocks.push(b);
+    }
+  });
+  return blocks.length ? blocks : [String(content || "").trim()].filter(Boolean);
+}
+function renderQueueBar() {
+  const bar = $("queueBar");
+  if (!state.queue.length) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const total = state.queue.length;
+  if (state.qi >= total) {
+    $("queueCount").textContent = `큐 완료 (${total}개)`;
+    $("queueCurrent").textContent = "모든 프롬프트를 처리했습니다.";
+    return;
+  }
+  $("queueCount").textContent = `큐 ${state.qi + 1}/${total}`;
+  const cur = state.queue[state.qi] || "";
+  const one = cur.replace(/\s+/g, " ").trim();
+  $("queueCurrent").textContent = one.slice(0, 90) + (one.length > 90 ? "…" : "");
+}
+function fillCurrentQueue() {
+  if (state.qi >= state.queue.length) { toast("큐의 모든 프롬프트를 처리했습니다 ✓"); renderQueueBar(); return; }
+  const pi = $("promptInput");
+  pi.value = state.queue[state.qi];
+  autoGrow(pi); pi.focus();
+  renderQueueBar();
+}
+function skipQueue() {
+  if (state.qi < state.queue.length) state.qi++;
+  if (state.qi >= state.queue.length) { toast("큐 끝까지 왔습니다."); renderQueueBar(); }
+  else fillCurrentQueue();
+}
+function clearQueue() {
+  state.queue = []; state.qi = 0;
+  $("promptInput").value = ""; autoGrow($("promptInput"));
+  renderQueueBar();
+  toast("큐를 비웠습니다.");
+}
+function advanceQueueAfterGenerate() {
+  if (!state.queue.length || state.qi >= state.queue.length) return;
+  state.qi++;
+  if (state.qi < state.queue.length) {
+    fillCurrentQueue();
+    toast(`다음 프롬프트(${state.qi + 1}/${state.queue.length})를 입력창에 넣었어요. 검토 후 ‘생성’ ↑`);
+  } else {
+    renderQueueBar();
+    toast("큐의 마지막 프롬프트까지 생성 완료 ✓");
+  }
+}
+
+// 보관함 → 큐 가져오기 모달
+let archSel = [];
+async function openArchivePicker() {
+  archSel = [];
+  $("archivePickCount").textContent = "선택: 0";
+  $("archiveModal").hidden = false;
+  await renderArchivePickList();
+}
+async function renderArchivePickList() {
+  const wrap = $("archivePickList");
+  wrap.innerHTML = '<p class="muted">불러오는 중…</p>';
+  let items = [];
+  try { items = (await api.listArchives()).archives || []; }
+  catch (e) { wrap.innerHTML = `<p class="fail">${errMsg(e)}</p>`; return; }
+  if (!items.length) {
+    wrap.innerHTML = '<p class="muted">보관된 프롬프트가 없습니다. 프롬프트 빌더에서 「📌 보관」으로 저장하세요.</p>';
+    return;
+  }
+  wrap.innerHTML = "";
+  items.forEach((it) => {
+    const row = document.createElement("label");
+    row.className = "arch-pick-item";
+    row.innerHTML = `<input type="checkbox" />
+      <span class="api-title">${escapeHtml(it.title)}</span>
+      <span class="api-meta">${escapeHtml(it.created)} · ${it.chars.toLocaleString()}자</span>
+      <span class="api-prev">${escapeHtml(it.preview)}</span>`;
+    row.querySelector("input").addEventListener("change", (e) => {
+      if (e.target.checked) archSel.push(it.id);
+      else archSel = archSel.filter((x) => x !== it.id);
+      $("archivePickCount").textContent = "선택: " + archSel.length;
+    });
+    wrap.appendChild(row);
+  });
+}
+async function buildQueueFromSelection() {
+  if (!archSel.length) { toast("프롬프트를 1개 이상 선택하세요.", true); return; }
+  const split = $("archiveSplit").checked;
+  const queue = [];
+  for (const id of archSel) {
+    try {
+      const r = await api.getArchive(id);
+      const content = r.ok && r.archive ? r.archive.content : "";
+      splitPromptBlocks(content, split).forEach((b) => queue.push(b));
+    } catch {}
+  }
+  if (!queue.length) { toast("가져올 프롬프트 내용이 없습니다.", true); return; }
+  state.queue = queue; state.qi = 0;
+  $("archiveModal").hidden = true;
+  fillCurrentQueue();
+  toast(`프롬프트 ${queue.length}개를 큐에 담았습니다. 첫 프롬프트를 입력창에 넣었어요 ✓`);
 }
 
 async function applyEdit() {
@@ -488,6 +600,30 @@ function wire() {
   $("engineSelect").addEventListener("change", (e) => {
     $("geminiFields").hidden = e.target.value !== "gemini";
   });
+
+  // 로그인 / 계정변경 / 로그아웃 (새 cmd 창에서 codex 실행)
+  $("loginBtn").addEventListener("click", async () => {
+    try { const r = await api.authLogin(); toast(r.ok ? r.message : (r.error || "실패"), !r.ok); }
+    catch (e) { toast(errMsg(e), true); }
+  });
+  $("logoutBtn").addEventListener("click", async () => {
+    if (!confirm("현재 ChatGPT 계정에서 로그아웃할까요? (새 창에서 진행)")) return;
+    try { const r = await api.authLogout(); toast(r.ok ? r.message : (r.error || "실패"), !r.ok); }
+    catch (e) { toast(errMsg(e), true); }
+  });
+  $("authRefreshBtn").addEventListener("click", async () => {
+    const st = await refreshAuthChip();
+    $("authStatus").innerHTML = authStatusHtml(st);
+  });
+
+  // 프롬프트 큐 (보관함에서 가져와 한 장씩 자동 입력)
+  $("queueBtn").addEventListener("click", openArchivePicker);
+  $("archiveModalClose").addEventListener("click", () => ($("archiveModal").hidden = true));
+  $("archiveReload").addEventListener("click", renderArchivePickList);
+  $("archiveToQueue").addEventListener("click", buildQueueFromSelection);
+  $("queueFillBtn").addEventListener("click", fillCurrentQueue);
+  $("queueSkipBtn").addEventListener("click", skipQueue);
+  $("queueClearBtn").addEventListener("click", clearQueue);
 
   // 모달 바깥 클릭 닫기
   document.querySelectorAll(".modal").forEach((m) =>

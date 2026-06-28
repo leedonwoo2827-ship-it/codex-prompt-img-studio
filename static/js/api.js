@@ -21,8 +21,14 @@ async function err(r) {
 
 export const api = {
   authStatus: () => jget("/api/auth/status"),
+  authLogin: () => jsend("/api/auth/login", "POST"),
+  authLogout: () => jsend("/api/auth/logout", "POST"),
   getSettings: () => jget("/api/settings"),
   saveSettings: (patch) => jsend("/api/settings", "POST", patch),
+
+  // 보관함(빌더에서 저장한 프롬프트) — 스튜디오 큐에서 가져오기
+  listArchives: () => jget("/api/builder/archives"),
+  getArchive: (id) => jget(`/api/builder/archives/${id}`),
 
   listProjects: () => jget("/api/projects"),
   createProject: (name) => jsend("/api/projects", "POST", { name }),
