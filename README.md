@@ -24,21 +24,17 @@ codex login
 1. `setup.bat` 더블클릭 — 가상환경 생성, 의존성 설치, `codex login` 안내
 2. `run.bat` 더블클릭 — 브라우저에서 `http://127.0.0.1:8765/` 자동 열림
 
-**macOS (Apple) — 더블클릭**
-1. 먼저 준비물 설치: [Python 3](https://www.python.org/downloads/macos/) 와 [Node.js](https://nodejs.org/) (각 설치 파일 더블클릭)
-2. 이 저장소를 내려받아 압축을 풉니다. (초록색 **Code → Download ZIP**)
-3. **최초 1회만** 터미널에서 아래를 복사해 실행 — ZIP 다운로드는 실행권한·보안격리가 걸려 있어 풀어줘야 합니다:
-   ```bash
-   cd ~/Downloads/codex-prompt-img-studio-master   # 압축 푼 폴더 경로
-   xattr -dr com.apple.quarantine .                # 보안 격리 해제
-   chmod +x setup.command run.command setup.sh run.sh
-   ```
-   > 폴더를 터미널로 끌어다 놓으면 경로가 자동 입력됩니다. (`cd ` 입력 후 폴더 드래그)
-4. **`setup.command` 더블클릭** — 환경 설치 + ChatGPT 로그인 (브라우저 자동 열림)
-5. 이후엔 **`run.command` 더블클릭** — 서버 실행 + 브라우저 자동 열림 (`http://127.0.0.1:8765/`)
-   - 종료: 열린 터미널 창에서 `Control+C` 또는 창 닫기
+**macOS (Apple)**
 
-> 처음 더블클릭 시 "확인되지 않은 개발자" 경고가 뜨면, 파일을 **우클릭 → 열기**를 선택하세요.
+준비물(각 설치파일 더블클릭): [Python 3](https://www.python.org/downloads/macos/) · [Node.js](https://nodejs.org/)
+
+1. 저장소 내려받기 — 초록색 **Code → Download ZIP** 후 압축 풀기
+2. **`setup.command` 더블클릭** → 환경 설치 + ChatGPT 로그인(브라우저 자동)
+3. 이후엔 **`run.command` 더블클릭** → 실행 + 브라우저 자동 열림 (`http://127.0.0.1:8765/`)
+   - 종료: 터미널 창에서 `Control+C` 또는 창 닫기
+
+> 더블클릭이 막히면(“확인되지 않은 개발자” / 권한 오류) 파일 **우클릭 → 열기**.
+> ZIP 다운로드 특성상 권한·보안격리로 안 열릴 수 있는데, 한 번에 푸는 방법은 아래 **상세 가이드(지식베이스)** 참고.
 
 **Linux**
 ```bash
@@ -49,26 +45,13 @@ chmod +x setup.sh run.sh   # 최초 1회 (git clone 시엔 보통 불필요)
 
 > iOS/iPadOS 등 모바일은 로컬 Python 서버 실행이 불가하여 지원하지 않습니다(데스크톱 전용).
 
-## 구조
+## 상세 가이드 / 문서
 
-```
-app.py                       # 통합 FastAPI 진입점 (단일 포트 8765, 단일 정적 마운트)
-core/                        # 경로/설정/DB (이미지 스튜디오 + 빌더 경로 통합)
-services/
-  codex_auth.py              # ChatGPT OAuth 상태
-  codex_image.py             # 이미지 생성/수정/병합 (Codex Responses API)
-  codex_text.py              # 빌더 텍스트·비전 (같은 Codex 백엔드 재사용) ← 신규
-  prompt_spec / presets / archive / manuscript.py   # 빌더 서비스
-routes/
-  auth · settings · project · image_routes.py        # /api/* (스튜디오)
-  builder_*_routes.py                                # /api/builder/* (빌더)
-static/
-  index.html                 # 워크스페이스 전환 셸 + 두 UI
-  css/tokens.css · app.css   # Miro 디자인 토큰 + 통합 스타일
-  js/shell.js · app.js · builder.js · api.js
-prompts/ · presets/          # 빌더 자산
-data/                        # 런타임 (app.db · images/ · settings.json · archives.json)
-```
+설치 트러블슈팅(특히 macOS 권한·보안격리 해제), 시스템 구조, API 구성 등 자세한 내용은 `docs/` 에 정리했습니다.
+
+- 📥 [docs/INSTALL.md](docs/INSTALL.md) — 상세 설치 & 문제 해결(Windows/macOS/Linux, 로그인/계정변경, FAQ)
+- 🧱 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 시스템 구조 & API 구성
+- 📖 앱 내 프롬프트 매뉴얼: 상단 우측 **📖** 아이콘
 
 ## 디자인
 
