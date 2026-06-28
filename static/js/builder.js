@@ -173,11 +173,36 @@ inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); composerEl.requestSubmit(); }
 });
 $b("newChatBtn").onclick = () => {
-  if (!confirm("현재 대화를 비우고 새로 시작할까요?")) return;
+  if (!confirm("현재 작업(대화 · 생성기 선택값 · 첨부)을 모두 비우고 새로 시작할까요?")) return;
+  // 1) 자유 빌더(채팅) 초기화
   messages.length = 0;
-  document.querySelectorAll(".preset-side-item.selected").forEach((n) => n.classList.remove("selected"));
   chatEl.querySelectorAll(".msg:not(:first-child)").forEach((n) => n.remove());
+  pendingImages = []; renderAttachPreview();
+  // 2) 프리셋 선택 해제
+  document.querySelectorAll(".preset-side-item.selected").forEach((n) => n.classList.remove("selected"));
+  // 3) 프롬프트 생성기 초기화
+  resetGenerator();
 };
+
+// 프롬프트 생성기 탭의 모든 선택값/원고/결과를 비운다.
+function resetGenerator() {
+  gen.purpose = null; gen.tone = null; gen.color = null; gen.style = null;
+  gen.cuts = null; gen.manuscripts = [];
+  ["grpPurpose", "grpTone", "grpColor", "grpPreset", "grpCuts"].forEach((id) => {
+    const el = $b(id);
+    if (el) [...el.children].forEach((c) => c.classList.remove("selected"));
+  });
+  // 스타일 옵션은 첫 항목 "(없음)" 을 기본 선택 상태로
+  const styleFirst = $b("grpPreset") && $b("grpPreset").firstElementChild;
+  if (styleFirst) styleFirst.classList.add("selected");
+  $b("genColorCustom").value = "";
+  $b("genNote").value = "";
+  $b("cutRecommend").textContent = "";
+  $b("cutMsg").textContent = ""; $b("cutMsg").className = "cut-msg";
+  $b("genFile").value = "";
+  renderGenFiles();
+  $b("genResult").innerHTML = '<p class="muted">옵션을 고르고 「확정」을 누르면 여기에 최종 프롬프트가 나옵니다.</p>';
+}
 
 // ── 프리셋(1번 탭 사이드) / 스타일(2번 탭 옵션) ─────────
 let bundlePresets = [];

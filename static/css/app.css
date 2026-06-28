@@ -19,6 +19,9 @@ h1, h2, h3, h4 { font-weight: 500; letter-spacing: -0.4px; color: var(--ink-deep
 button { font-family: inherit; }
 a { color: var(--brand-blue); text-decoration: none; }
 
+/* hidden 속성은 항상 숨김 — .gallery/.viewer 등 display 규칙이 UA 기본을 덮어쓰는 문제 방지 */
+[hidden] { display: none !important; }
+
 /* ════════════════════════════════════════════════════════════
    App shell — 상단바 + 워크스페이스 전환
    ════════════════════════════════════════════════════════════ */
