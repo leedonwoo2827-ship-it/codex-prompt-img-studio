@@ -24,12 +24,29 @@ codex login
 1. `setup.bat` 더블클릭 — 가상환경 생성, 의존성 설치, `codex login` 안내
 2. `run.bat` 더블클릭 — 브라우저에서 `http://127.0.0.1:8765/` 자동 열림
 
-**Linux / macOS**
+**macOS (Apple) — 더블클릭**
+1. 먼저 준비물 설치: [Python 3](https://www.python.org/downloads/macos/) 와 [Node.js](https://nodejs.org/) (각 설치 파일 더블클릭)
+2. 이 저장소를 내려받아 압축을 풉니다. (초록색 **Code → Download ZIP**)
+3. **최초 1회만** 터미널에서 아래를 복사해 실행 — ZIP 다운로드는 실행권한·보안격리가 걸려 있어 풀어줘야 합니다:
+   ```bash
+   cd ~/Downloads/codex-prompt-img-studio-master   # 압축 푼 폴더 경로
+   xattr -dr com.apple.quarantine .                # 보안 격리 해제
+   chmod +x setup.command run.command setup.sh run.sh
+   ```
+   > 폴더를 터미널로 끌어다 놓으면 경로가 자동 입력됩니다. (`cd ` 입력 후 폴더 드래그)
+4. **`setup.command` 더블클릭** — 환경 설치 + ChatGPT 로그인 (브라우저 자동 열림)
+5. 이후엔 **`run.command` 더블클릭** — 서버 실행 + 브라우저 자동 열림 (`http://127.0.0.1:8765/`)
+   - 종료: 열린 터미널 창에서 `Control+C` 또는 창 닫기
+
+> 처음 더블클릭 시 "확인되지 않은 개발자" 경고가 뜨면, 파일을 **우클릭 → 열기**를 선택하세요.
+
+**Linux**
 ```bash
-chmod +x setup.sh run.sh   # 최초 1회 (저장소에 실행권한 포함되어 보통 불필요)
+chmod +x setup.sh run.sh   # 최초 1회 (git clone 시엔 보통 불필요)
 ./setup.sh                 # 가상환경 + 의존성 + codex login
 ./run.sh                   # 서버 실행 → http://127.0.0.1:8765/
 ```
+
 > iOS/iPadOS 등 모바일은 로컬 Python 서버 실행이 불가하여 지원하지 않습니다(데스크톱 전용).
 
 ## 구조
