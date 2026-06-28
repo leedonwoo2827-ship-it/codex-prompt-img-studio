@@ -18,10 +18,19 @@ codex login
 
 자격증명은 `~/.codex/auth.json` 에 저장되며, 토큰이 만료되면 자동 갱신됩니다.
 
-## 설치 & 실행 (Windows)
+## 설치 & 실행
 
+**Windows**
 1. `setup.bat` 더블클릭 — 가상환경 생성, 의존성 설치, `codex login` 안내
 2. `run.bat` 더블클릭 — 브라우저에서 `http://127.0.0.1:8765/` 자동 열림
+
+**Linux / macOS**
+```bash
+chmod +x setup.sh run.sh   # 최초 1회 (저장소에 실행권한 포함되어 보통 불필요)
+./setup.sh                 # 가상환경 + 의존성 + codex login
+./run.sh                   # 서버 실행 → http://127.0.0.1:8765/
+```
+> iOS/iPadOS 등 모바일은 로컬 Python 서버 실행이 불가하여 지원하지 않습니다(데스크톱 전용).
 
 ## 구조
 
