@@ -440,6 +440,74 @@ input[type="text"]:focus, input[type="password"]:focus, .gen-field textarea:focu
 }
 
 /* ════════════════════════════════════════════════════════════
+   슬라이드 JSON 일괄 생성 (모달 탭 + 목록 + 진행바)
+   ════════════════════════════════════════════════════════════ */
+.modal-box.wide { width: min(900px, 100%); }
+.tabbar.mini { align-self: flex-start; }
+.tabbar.mini .tab { padding: 7px 14px; font-size: 13px; }
+.qsrc-pane { display: flex; flex-direction: column; gap: var(--sp-md); }
+.qsrc-pane.hidden { display: none; }
+
+.paste-wrap { display: flex; gap: 8px; align-items: flex-start; }
+.paste-wrap.hidden { display: none; }
+.paste-wrap textarea {
+  flex: 1; font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  border: 1px solid var(--hairline-strong); border-radius: var(--r-md); padding: 10px 12px; resize: vertical;
+}
+.batch-summary { font-size: 13px; color: var(--slate); min-height: 18px; margin: 0; }
+.batch-summary b { color: var(--ink-deep); }
+
+.batch-opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-md); }
+.bo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--charcoal); }
+.bo-row { display: flex; gap: 6px; align-items: center; }
+.bo-row input[type="text"] { flex: 1; min-width: 0; }
+.bo select, .bo input[type="text"] { font-weight: 400; }
+.bo.checks { flex-direction: row; flex-wrap: wrap; gap: var(--sp-md); align-items: center; font-weight: 500; color: var(--slate); }
+.bo.checks label { display: inline-flex; align-items: center; gap: 6px; }
+.batch-opts code { font-family: var(--font-mono); font-size: 12px; }
+
+.batch-list { display: flex; flex-direction: column; gap: 3px; max-height: 34vh; overflow-y: auto; }
+.batch-row {
+  display: grid; grid-template-columns: auto 38px 1.6fr 0.9fr 1.2fr; gap: 10px; align-items: center;
+  padding: 7px 10px; border: 1px solid var(--hairline); border-radius: var(--r-md);
+  font-size: 12.5px; cursor: pointer; background: var(--canvas);
+}
+.batch-row:hover { border-color: var(--brand-blue); background: var(--surface-soft); }
+.batch-row.has-file { background: var(--yellow-light); border-color: #f0e0a8; }
+.batch-row .br-n { font-family: var(--font-mono); font-weight: 700; color: var(--ink-deep); }
+.batch-row .br-title { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-row .br-type, .batch-row .br-file { color: var(--stone); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.batch-bar {
+  display: flex; align-items: center; gap: var(--sp-md);
+  padding: var(--sp-sm) var(--sp-xl);
+  background: var(--surface-featured); border-top: 1px solid var(--hairline);
+  font-size: 13px; color: var(--ink);
+}
+.batch-bar[hidden] { display: none; }
+.batch-bar .q-icon { font-size: 15px; }
+.batch-bar .bb-main { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 5px; }
+.batch-bar .bb-top { display: flex; gap: var(--sp-sm); align-items: baseline; }
+.batch-bar .bb-count { font-weight: 600; color: var(--ink-deep); white-space: nowrap; }
+.batch-bar .bb-cur { color: var(--slate); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.batch-bar .bb-track { height: 5px; border-radius: var(--r-full); background: rgba(5,0,56,0.12); overflow: hidden; }
+.batch-bar .bb-fill { height: 100%; width: 0; background: var(--brand-blue); border-radius: var(--r-full); transition: width 0.4s ease; }
+.batch-bar .q-actions { display: flex; gap: 6px; }
+.batch-bar .ghost-btn { padding: 6px 12px; font-size: 12px; white-space: nowrap; }
+
+@media (max-width: 1023px) {
+  .batch-opts { grid-template-columns: repeat(2, 1fr); }
+  .batch-row { grid-template-columns: auto 34px 1.4fr 1.2fr; }
+  .batch-row .br-type { display: none; }
+}
+@media (max-width: 767px) {
+  .batch-opts { grid-template-columns: 1fr; }
+  .batch-bar { flex-wrap: wrap; }
+  .batch-row { grid-template-columns: auto 34px 1fr; }
+  .batch-row .br-file { display: none; }
+}
+
+/* ════════════════════════════════════════════════════════════
    반응형
    ════════════════════════════════════════════════════════════ */
 @media (max-width: 1023px) {

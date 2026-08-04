@@ -46,6 +46,16 @@ export const api = {
   generate: (body) => jsend("/api/images/generate", "POST", body),
   edit: (id, body) => jsend(`/api/images/${id}/edit`, "POST", body),
   compose: (body) => jsend("/api/images/compose", "POST", body),
+  // 슬라이드 JSON 일괄 생성
+  batchParse: (text) => jsend("/api/batch/parse", "POST", { text }),
+  batchInspect: (dir) => jsend("/api/batch/inspect", "POST", { dir }),
+  batchReveal: (dir) => jsend("/api/batch/reveal", "POST", { dir }),
+  batchStart: (body) => jsend("/api/batch/start", "POST", body),
+  batchActive: () => jget("/api/batch/active"),
+  batchJob: (id) => jget(`/api/batch/${id}`),
+  batchStop: (id) => jsend(`/api/batch/${id}/stop`, "POST"),
+  batchRetry: (id) => jsend(`/api/batch/${id}/retry`, "POST"),
+
   favorite: (id) => jsend(`/api/images/${id}/favorite`, "POST"),
   move: (id, project_id) => jsend(`/api/images/${id}/move`, "POST", { project_id }),
   remove: (id) => jsend(`/api/images/${id}`, "DELETE"),

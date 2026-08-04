@@ -17,8 +17,9 @@ services/
   codex_text.py              # 빌더 텍스트·비전 (codex_image 의 토큰/스트림 재사용) ← 신규
   prompt_spec.py             # 빌더 시스템 프롬프트 조립
   presets.py / archive.py / manuscript.py   # 프리셋 / 보관함 / 원고 추출
+  batch_jobs.py              # 슬라이드 JSON 일괄 생성 (번호 파일명 · 동시실행 · 재시도 · 이어하기)
 routes/
-  auth · settings · project · image_routes.py        # /api/*        (스튜디오)
+  auth · settings · project · image · batch_routes.py   # /api/*     (스튜디오)
   builder_chat · preset · archive · manuscript_routes.py   # /api/builder/* (빌더)
 static/
   index.html                 # 워크스페이스 전환 셸 + 두 UI
@@ -34,7 +35,7 @@ data/                        # 런타임 (app.db · images/ · settings.json · 
 | 워크스페이스 | UI | API |
 |---|---|---|
 | ✍️ 프롬프트 빌더 (앞) | 자유 빌더(채팅) · 프롬프트 생성기 · 보관함 | `/api/builder/*` |
-| 🎨 이미지 스튜디오 (뒤) | 갤러리 · 뷰어/편집 · 병합 · 큐 | `/api/auth` · `/api/settings` · `/api/projects` · `/api/images` |
+| 🎨 이미지 스튜디오 (뒤) | 갤러리 · 뷰어/편집 · 병합 · 큐 · 일괄 생성 | `/api/auth` · `/api/settings` · `/api/projects` · `/api/images` · `/api/batch` |
 
 - 빌더 API는 모두 `/api/builder/*` 로 묶어 스튜디오 `/api/*` 와 충돌을 피했습니다.
 - 정적 자산은 `/` 단일 마운트, 프리셋 커버는 `/presets` 마운트.
@@ -56,6 +57,25 @@ data/                        # 런타임 (app.db · images/ · settings.json · 
 - 빌더 「📌 보관」 → `data/archives.json`
 - 스튜디오 `📋` → 보관 프롬프트 선택 → (옵션) 코드블록(컷) 단위로 분리해 큐 적재
 - 한 장씩 자동 입력 → 생성 성공 시 다음 프롬프트 자동 입력 (일괄 동시 생성 아님)
+
+## 슬라이드 JSON 일괄 생성 (`/api/batch`)
+
+강의 슬라이드용 이미지 프롬프트 JSON을 넣으면 **슬라이드 번호에 맞춘 파일명**으로 폴더에 한꺼번에 만든다.
+(PPT 합치기 도구가 파일명 앞 숫자로 슬라이드를 찾으므로 번호가 곧 계약.)
+
+- 입력: `{"deck","style_hint","aspect","prompts":[{"n","title","type","place","prompt","negative"}]}`
+  — `prompts` 대신 `items`/`scenes` 도 인식, 최상위가 배열이어도 됨.
+- 프롬프트 조립: `prompt` + (프롬프트에 없으면) `style_hint` + `negative` → `Avoid: …` 문장.
+  (Codex 이미지 툴에는 negative 파라미터가 없다.)
+- 출력: `<출력폴더>/003.png` (옵션: `003_제목.png`) · `aspect: landscape` → `1536x1024` 자동 제안
+- 실행: `services/batch_jobs.py` 가 asyncio 세마포어로 동시 N장(기본 3, 최대 6),
+  항목별 재시도 + 지수 백오프(429 는 45초), **한 번에 한 작업만**(중단 처리 중에도 차단)
+- 이어하기: 폴더에 이미 있는 `NNN*.png` 는 `skipped` — 중단 후 다시 돌리면 남은 것만 만든다.
+- 401(로그인 만료)은 즉시 전체 중단 — 남은 구독 할당량을 헛되이 태우지 않는다.
+- 진행 상태는 `data/batch_jobs/<job_id>.json` 에 계속 기록되어 브라우저를 닫아도 서버에서 진행.
+  (단, 서버를 재시작하면 진행 중 작업은 사라진다 — 다시 시작하면 이어하기로 남은 장만 생성)
+- API: `POST /parse` · `POST /inspect`(폴더 조회, 만들지는 않음) · `POST /reveal` ·
+  `POST /start` · `GET /active` · `GET /{job_id}` · `POST /{job_id}/stop` · `POST /{job_id}/retry`
 
 ## 데이터/프라이버시
 

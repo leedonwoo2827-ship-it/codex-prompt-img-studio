@@ -31,6 +31,7 @@ from core.database import init_db  # noqa: E402
 
 # 이미지 스튜디오 라우터
 from routes.auth_routes import router as auth_router  # noqa: E402
+from routes.batch_routes import router as batch_router  # noqa: E402
 from routes.image_routes import router as image_router  # noqa: E402
 from routes.project_routes import router as project_router  # noqa: E402
 from routes.settings_routes import router as settings_router  # noqa: E402
@@ -55,6 +56,7 @@ app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(project_router)
 app.include_router(image_router)
+app.include_router(batch_router)
 
 # 프롬프트 빌더
 app.include_router(builder_chat_router)

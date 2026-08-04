@@ -312,6 +312,260 @@ async function buildQueueFromSelection() {
   toast(`프롬프트 ${queue.length}개를 큐에 담았습니다. 첫 프롬프트를 입력창에 넣었어요 ✓`);
 }
 
+// ── 슬라이드 JSON 일괄 생성 (번호 파일명으로 폴더에 저장) ───
+const batch = {
+  parsed: null,        // {deck, suggested_size, items:[...]}
+  sel: new Set(),      // 선택된 슬라이드 번호
+  existing: {},        // {슬라이드번호: 이미 있는 파일명}
+  jobId: null,
+  timer: null,
+  dirOk: "",           // 확인 완료된 출력 폴더
+};
+
+function switchQsrc(which) {
+  document.querySelectorAll("#qsrcTabs .tab").forEach((t) =>
+    t.classList.toggle("active", t.dataset.qsrc === which));
+  document.querySelectorAll("[data-qsrc-pane]").forEach((p) =>
+    p.classList.toggle("hidden", p.dataset.qsrcPane !== which));
+}
+
+function parseRangeSpec(spec) {
+  const out = new Set();
+  String(spec || "").split(/[,\s]+/).forEach((part) => {
+    if (!part) return;
+    const m = part.match(/^(\d+)\s*[-~]\s*(\d+)$/);
+    if (m) {
+      const a = Number(m[1]), b = Number(m[2]);
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) out.add(i);
+    } else if (/^\d+$/.test(part)) out.add(Number(part));
+  });
+  return out;
+}
+
+// 기본 선택: place=true 만 / 이미 있는 번호 제외
+function recomputeBatchSelection() {
+  if (!batch.parsed) return;
+  const placeOnly = $("batchPlaceOnly").checked;
+  const skip = $("batchSkip").checked;
+  const range = parseRangeSpec($("batchRange").value);
+  batch.sel = new Set(
+    batch.parsed.items
+      .filter((it) => (!placeOnly || it.place)
+        && (!range.size || range.has(it.n))
+        && !(skip && batch.existing[it.n]))
+      .map((it) => it.n)
+  );
+  renderBatchList();
+}
+
+function renderBatchList() {
+  const wrap = $("batchList");
+  if (!batch.parsed) { wrap.innerHTML = ""; $("batchCount").textContent = "선택: 0"; return; }
+  const nameMode = $("batchNameMode").value;
+  wrap.innerHTML = "";
+  batch.parsed.items.forEach((it) => {
+    const has = batch.existing[it.n];
+    const row = document.createElement("label");
+    row.className = "batch-row" + (has ? " has-file" : "");
+    const fname = nameMode === "num_title"
+      ? `${String(it.n).padStart(3, "0")}_${(it.title || "").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, "_").slice(0, 28)}.png`
+      : `${String(it.n).padStart(3, "0")}.png`;
+    row.innerHTML = `<input type="checkbox" ${batch.sel.has(it.n) ? "checked" : ""} />
+      <span class="br-n">${String(it.n).padStart(3, "0")}</span>
+      <span class="br-title">${escapeHtml(it.title) || "<span class='muted'>(제목 없음)</span>"}</span>
+      <span class="br-type">${escapeHtml(it.type)}${it.place ? " · place" : ""}</span>
+      <span class="br-file">${has ? "이미 있음: " + escapeHtml(has) : escapeHtml(fname)}</span>`;
+    row.querySelector("input").addEventListener("change", (e) => {
+      if (e.target.checked) batch.sel.add(it.n); else batch.sel.delete(it.n);
+      updateBatchCount();
+    });
+    wrap.appendChild(row);
+  });
+  updateBatchCount();
+}
+function updateBatchCount() {
+  const n = batch.sel.size;
+  const dup = [...batch.sel].filter((x) => batch.existing[x]).length;
+  $("batchCount").textContent = `선택: ${n}장` + (dup ? ` (덮어쓰기 ${dup}장 포함)` : "");
+  $("batchStart").disabled = n === 0;
+}
+
+async function loadBatchJson(text) {
+  try {
+    const r = await api.batchParse(text);
+    batch.parsed = r;
+    const sizes = state.settings.size_choices || ["auto"];
+    fillSizeSelect($("batchSize"), sizes, r.suggested_size);
+    const nums = r.items.map((i) => i.n);
+    const dupNums = [...new Set(nums.filter((n, i) => nums.indexOf(n) !== i))];
+    $("batchSummary").innerHTML =
+      `✓ <b>${escapeHtml(r.deck) || "프롬프트"}</b> — 프롬프트 ${r.count}개 인식`
+      + (r.aspect ? ` · 비율 ${escapeHtml(r.aspect)} → ${escapeHtml(r.suggested_size)}` : "")
+      + ` · place=true ${r.items.filter((i) => i.place).length}개`
+      + (dupNums.length ? ` <span class="fail">· ⚠ 번호 중복 ${dupNums.join(", ")}`
+        + ` — 같은 파일명에 덮어써집니다</span>` : "");
+    if ($("batchDir").value.trim()) await checkBatchDir(true);
+    recomputeBatchSelection();
+  } catch (e) {
+    batch.parsed = null;
+    $("batchSummary").innerHTML = `<span class="fail">${errMsg(e)}</span>`;
+    renderBatchList();
+  }
+}
+
+async function checkBatchDir(quiet = false) {
+  const dir = $("batchDir").value.trim();
+  if (!dir) { if (!quiet) toast("출력 폴더 경로를 입력하세요.", true); return false; }
+  try {
+    const r = await api.batchInspect(dir);
+    if (!r.ok) { batch.dirOk = ""; toast(r.error, true); return false; }
+    batch.dirOk = r.dir;
+    batch.existing = {};
+    Object.entries(r.existing || {}).forEach(([k, v]) => (batch.existing[Number(k)] = v));
+    localStorage.setItem("batchDir", r.dir);
+    const cnt = Object.keys(batch.existing).length;
+    if (!quiet) {
+      toast("폴더 확인 ✓ " + (!r.exists ? "아직 없는 폴더 — 생성 시작할 때 만듭니다."
+        : cnt ? `이미 있는 번호 파일 ${cnt}개 (건너뛰기 대상)` : "비어 있음"));
+    }
+    recomputeBatchSelection();
+    return true;
+  } catch (e) { toast(errMsg(e), true); return false; }
+}
+
+async function startBatch() {
+  if (!batch.parsed) { toast("먼저 JSON 을 넣어 주세요.", true); return; }
+  if (!batch.sel.size) { toast("생성할 슬라이드를 1개 이상 선택하세요.", true); return; }
+  if (!(await checkBatchDir(true))) return;
+  const items = batch.parsed.items
+    .filter((it) => batch.sel.has(it.n))
+    .map((it) => ({ n: it.n, title: it.title, prompt: it.prompt }));
+  const dup = items.filter((it) => batch.existing[it.n]).length;
+  const skip = $("batchSkip").checked;
+  const msg = `${items.length}장을 생성합니다.\n\n저장 폴더: ${batch.dirOk}\n`
+    + (dup && !skip ? `\n⚠ 이미 있는 번호 ${dup}장을 덮어씁니다.\n` : "")
+    + `\n구독 할당량이 ${items.length}장만큼 사용됩니다. 진행할까요?`;
+  if (!confirm(msg)) return;
+
+  const btn = $("batchStart");
+  busy(btn, true, "시작 중…");
+  try {
+    const r = await api.batchStart({
+      items,
+      out_dir: batch.dirOk,
+      size: $("batchSize").value,
+      deck: batch.parsed.deck || "",
+      workers: Number($("batchWorkers").value),
+      retries: Number($("batchRetries").value),
+      skip_existing: skip,
+      with_title: $("batchNameMode").value === "num_title",
+      to_gallery: $("batchGallery").checked,
+    });
+    $("archiveModal").hidden = true;
+    attachBatchJob(r.job);
+    toast(`일괄 생성을 시작했습니다 (${items.length}장) — 창을 닫아도 계속 진행됩니다 ✓`);
+  } catch (e) { toast(errMsg(e), true); }
+  finally { busy(btn, false); }
+}
+
+function attachBatchJob(job) {
+  batch.jobId = job.id;
+  renderBatchBar(job);
+  if (batch.timer) clearInterval(batch.timer);
+  batch.timer = setInterval(pollBatch, 2000);
+}
+
+let lastBatchDone = -1;
+async function pollBatch() {
+  if (!batch.jobId) return;
+  try {
+    const r = await api.batchJob(batch.jobId);
+    renderBatchBar(r.job);
+    const c = r.job.counts;
+    if (c.done !== lastBatchDone) {          // 새로 만들어진 게 있으면 갤러리 갱신
+      lastBatchDone = c.done;
+      await loadImages();
+    }
+    if (r.job.status !== "running" && r.job.status !== "stopping") {
+      clearInterval(batch.timer); batch.timer = null;
+      await loadProjects();
+      const tail = c.failed ? `실패 ${c.failed}장` : "전부 완료";
+      toast(`일괄 생성 종료 — 성공 ${c.done} · 건너뜀 ${c.skipped} · ${tail}`, c.failed > 0);
+    }
+  } catch (e) {
+    clearInterval(batch.timer); batch.timer = null;
+    $("batchBarCurrent").textContent = errMsg(e);
+  }
+}
+
+function renderBatchBar(job) {
+  const bar = $("batchBar");
+  bar.hidden = false;
+  const c = job.counts;
+  const pct = c.total ? Math.round((c.settled / c.total) * 100) : 0;
+  $("batchBarFill").style.width = pct + "%";
+  const label = { running: "일괄 생성 중", stopping: "중단 중", done: "완료",
+                  stopped: "중단됨", error: "오류로 중단" }[job.status] || job.status;
+  $("batchBarCount").textContent =
+    `${label} ${c.settled}/${c.total} · 성공 ${c.done}` +
+    (c.skipped ? ` · 건너뜀 ${c.skipped}` : "") +
+    (c.failed ? ` · 실패 ${c.failed}` : "");
+  const failed = job.items.filter((i) => i.status === "failed");
+  if (job.fatal) {
+    $("batchBarCurrent").innerHTML = `<span class="fail">${escapeHtml(job.fatal)}</span>`;
+  } else if (job.running_slides.length) {
+    $("batchBarCurrent").textContent =
+      "생성 중: " + job.running_slides.map((n) => String(n).padStart(3, "0")).join(", ");
+  } else if (failed.length) {
+    $("batchBarCurrent").innerHTML = `<span class="fail">실패 ${failed
+      .map((i) => String(i.n).padStart(3, "0")).join(", ")} — ${escapeHtml(failed[0].error || "")}</span>`;
+  } else {
+    $("batchBarCurrent").textContent = job.out_dir;
+  }
+  const busyNow = job.status === "running" || job.status === "stopping";
+  $("batchStopBtn").hidden = !busyNow;
+  $("batchHideBtn").hidden = busyNow;
+  $("batchRetryBtn").hidden = busyNow || !failed.length;
+  batch.dirOk = job.out_dir || batch.dirOk;
+}
+
+async function stopBatch() {
+  if (!batch.jobId) return;
+  if (!confirm("진행 중인 일괄 생성을 중단할까요? (이미 만든 파일은 그대로 남습니다)")) return;
+  try { renderBatchBar((await api.batchStop(batch.jobId)).job); toast("중단을 요청했습니다. 진행 중인 장은 끝까지 만듭니다."); }
+  catch (e) { toast(errMsg(e), true); }
+}
+async function retryBatch() {
+  if (!batch.jobId) return;
+  try {
+    const r = await api.batchRetry(batch.jobId);
+    attachBatchJob(r.job);
+    toast(`실패 ${r.requeued}장을 다시 시도합니다.`);
+  } catch (e) { toast(errMsg(e), true); }
+}
+async function revealBatchDir() {
+  const dir = batch.dirOk || $("batchDir").value.trim();
+  if (!dir) { toast("폴더 경로가 없습니다.", true); return; }
+  try { const r = await api.batchReveal(dir); if (!r.ok) toast(r.error, true); }
+  catch (e) { toast(errMsg(e), true); }
+}
+
+// 서버에서 이미 돌고 있는 배치가 있으면 새로고침 후에도 다시 붙는다.
+async function resumeBatch() {
+  try {
+    const r = await api.batchActive();
+    if (r.job) attachBatchJob(r.job);
+  } catch {}
+}
+
+async function readBatchFiles(fileList) {
+  const f = [...(fileList || [])][0];
+  if (!f) return;
+  const text = await f.text();
+  $("batchPaste").value = "";
+  await loadBatchJson(text);
+}
+
 async function applyEdit() {
   if (!state.current) return;
   const instruction = $("editInstruction").value.trim();
@@ -625,6 +879,46 @@ function wire() {
   $("queueSkipBtn").addEventListener("click", skipQueue);
   $("queueClearBtn").addEventListener("click", clearQueue);
 
+  // 슬라이드 JSON 일괄 생성
+  $("qsrcTabs").addEventListener("click", (e) => {
+    const t = e.target.closest(".tab");
+    if (t) switchQsrc(t.dataset.qsrc);
+  });
+  $("batchPick").addEventListener("click", () => $("batchFile").click());
+  $("batchFile").addEventListener("change", async (e) => {
+    await readBatchFiles(e.target.files);
+    e.target.value = "";
+  });
+  const bdrop = $("batchDrop");
+  ["dragenter", "dragover"].forEach((ev) => bdrop.addEventListener(ev, (e) => {
+    e.preventDefault(); bdrop.classList.add("drag");
+  }));
+  ["dragleave", "drop"].forEach((ev) => bdrop.addEventListener(ev, (e) => {
+    e.preventDefault(); bdrop.classList.remove("drag");
+  }));
+  bdrop.addEventListener("drop", (e) => readBatchFiles(e.dataTransfer.files));
+  $("batchPasteToggle").addEventListener("click", () =>
+    $("batchPasteWrap").classList.toggle("hidden"));
+  $("batchPasteRead").addEventListener("click", () => loadBatchJson($("batchPaste").value));
+  $("batchDirCheck").addEventListener("click", () => checkBatchDir());
+  $("batchDirOpen").addEventListener("click", revealBatchDir);
+  $("batchDir").addEventListener("change", () => checkBatchDir());
+  $("batchNameMode").addEventListener("change", renderBatchList);
+  ["batchSkip", "batchPlaceOnly"].forEach((id) =>
+    $(id).addEventListener("change", recomputeBatchSelection));
+  $("batchRangeApply").addEventListener("click", recomputeBatchSelection);
+  $("batchSelectAll").addEventListener("click", () => {
+    if (!batch.parsed) return;
+    batch.sel = new Set(batch.parsed.items.map((i) => i.n));
+    renderBatchList();
+  });
+  $("batchSelectNone").addEventListener("click", () => { batch.sel = new Set(); renderBatchList(); });
+  $("batchStart").addEventListener("click", startBatch);
+  $("batchStopBtn").addEventListener("click", stopBatch);
+  $("batchRetryBtn").addEventListener("click", retryBatch);
+  $("batchOpenDirBtn").addEventListener("click", revealBatchDir);
+  $("batchHideBtn").addEventListener("click", () => { $("batchBar").hidden = true; });
+
   // 모달 바깥 클릭 닫기
   document.querySelectorAll(".modal").forEach((m) =>
     m.addEventListener("click", (e) => { if (e.target === m) m.hidden = true; }));
@@ -634,7 +928,10 @@ function wire() {
 (async function init() {
   wire();
   await loadSettings();
+  fillSizeSelect($("batchSize"), state.settings.size_choices || ["auto"], "1536x1024");
+  $("batchDir").value = localStorage.getItem("batchDir") || "";
   await refreshAuthChip();
   await loadProjects();
   await loadImages();
+  await resumeBatch();   // 서버에서 돌고 있는 일괄 생성이 있으면 진행바 복구
 })();
