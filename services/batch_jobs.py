@@ -158,11 +158,31 @@ def size_for_aspect(aspect: str, fallback: str = "1536x1024") -> str:
     return _ASPECT_SIZE.get(str(aspect or "").strip().lower(), fallback)
 
 
+# 배경색을 명시한 프롬프트인지 판별 — "배경: 밝은 아이보리(#F6F1E8)", "바탕은 반드시 …#F6F1E8"
+_BG_SPEC_RE = re.compile(r"(배경|바탕)[^\n]{0,40}#[0-9A-Fa-f]{6}")
+
+# 배경 대비 가드. 배경색을 지정한 프롬프트에만 맨 앞에 붙는다.
+#
+# 왜 필요한가: 색/톤 문장이 "진한 파랑(#1F4E79)…중심" 처럼 어두운 색으로 시작하면
+# 이미지 모델이 그 색을 배경으로 받아들여 화면을 어둡게 칠하고, 뒤쪽에 적힌
+# 배경색 지시("바탕은 반드시 밝은 아이보리")를 흘려버린다. 그러면 같은 계열로
+# 지정된 글자색이 배경에 묻혀 슬라이드가 못 쓰게 된다. 배경 지시를 색/톤 문장보다
+# 먼저 읽게 해서 막는다. 특정 색을 강요하지 않으므로 어두운 덱에도 그대로 쓸 수 있다.
+_BG_GUARD = (
+    "【배경 · 최우선】 아래에 바탕/배경 색이 지정돼 있으면 그 색을 화면 전체에 고르게 칠하라 "
+    "— 네 귀퉁이와 가장자리까지 같은 밝기다. 지정된 배경색을 무시하고 다른 색으로 칠하지 말고, "
+    "비네팅·어두운 그라데이션·발광(글로우)·야간 조명·스포트라이트로 배경의 밝기를 바꾸지 마라. "
+    "글자는 배경과 명도 차이가 뚜렷한 색으로 써서 반드시 읽히게 하라. "
+    "아래 장면·구도·라벨 위치·문구는 그대로 따른다.\n\n─────────────\n"
+)
+
+
 def compose_prompt(item: dict, style_hint: str = "") -> str:
     """프롬프트 본문 + (있으면) 스타일 힌트/네거티브를 한 문장으로 합친다.
 
     codex 이미지 툴에는 negative 파라미터가 없어 'Avoid:' 문장으로 붙인다.
     이미 프롬프트에 같은 문구가 들어 있으면 중복해서 붙이지 않는다.
+    배경색을 명시한 프롬프트에는 앞에 배경 대비 가드를 세운다(_BG_GUARD 주석 참고).
     """
     prompt = str(item.get("prompt") or "").strip()
     hint = str(style_hint or "").strip()
@@ -171,7 +191,10 @@ def compose_prompt(item: dict, style_hint: str = "") -> str:
     neg = str(item.get("negative") or "").strip()
     if neg and "avoid:" not in prompt.lower():
         prompt = f"{prompt} Avoid: {neg}."
-    return prompt.strip()
+    prompt = prompt.strip()
+    if prompt and _BG_SPEC_RE.search(prompt) and "【배경" not in prompt:
+        prompt = _BG_GUARD + prompt
+    return prompt
 
 
 def normalize_payload(raw: Any) -> dict:
