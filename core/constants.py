@@ -21,7 +21,8 @@ APP_TITLE = "Codex Studio — 프롬프트 빌더 & 이미지 스튜디오"
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8765"))
 
-# gpt-image 가 네이티브로 지원하는 크기 3종 + 자동. (프론트에서 비율 라벨로 표시)
+# image_generation 툴이 네이티브로 지원하는 크기 3종 + 자동. (프론트에서 비율 라벨로 표시)
+# 이 밖의 값은 백엔드가 거절한다 — codex_image.CODEX_SIZES 에서 미리 거른다.
 SIZE_CHOICES = ["auto", "1024x1024", "1536x1024", "1024x1536"]
 
 # 디렉토리 보장

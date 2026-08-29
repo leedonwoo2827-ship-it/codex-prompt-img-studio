@@ -54,10 +54,7 @@ async function refreshAuthChip() {
   try {
     const s = await api.authStatus();
     const chip = $("authChip");
-    if (s.engine === "gemini") {
-      chip.textContent = "엔진: Gemini" + (s.ready ? " ✓" : " (키 필요)");
-      chip.className = "auth-chip " + (s.ready ? "ok" : "bad");
-    } else if (!s.installed) {
+    if (!s.installed) {
       chip.textContent = "codex 미설치"; chip.className = "auth-chip bad";
     } else if (!s.authenticated) {
       chip.textContent = "ChatGPT 로그인 필요"; chip.className = "auth-chip bad";
@@ -735,11 +732,7 @@ async function runMerge() {
 // ── 설정 모달 ──────────────────────────────────────────────
 async function openSettings() {
   const s = state.settings;
-  $("engineSelect").value = s.engine || "codex";
   fillSizeSelect($("defSizeSelect"), s.size_choices || ["auto"], s.default_size);
-  $("geminiFields").hidden = s.engine !== "gemini";
-  $("geminiKey").value = "";
-  $("geminiKey").placeholder = s.gemini_api_key_set ? "저장됨 (" + s.gemini_api_key + ") — 변경 시 입력" : "AI Studio 무료 키";
   const st = await refreshAuthChip();
   $("authStatus").innerHTML = authStatusHtml(st);
   $("settingsMsg").textContent = "";
@@ -747,19 +740,12 @@ async function openSettings() {
 }
 function authStatusHtml(s) {
   if (!s) return "상태 확인 실패";
-  if (s.engine === "gemini")
-    return s.ready ? "✅ Gemini 엔진 — 키 설정됨" : "⚠️ Gemini 키가 필요합니다 (아래 입력).";
   if (!s.installed) return "❌ codex CLI 미설치 — <code>npm i -g @openai/codex</code> 후 <code>codex login</code>";
   if (!s.authenticated) return "⚠️ ChatGPT 미로그인 — 터미널에서 <code>codex login</code> 실행";
   return `✅ ChatGPT 로그인됨${s.email ? " — " + s.email : ""} (키 없이 구독 할당량 사용)`;
 }
 async function saveSettings() {
-  const patch = {
-    engine: $("engineSelect").value,
-    default_size: $("defSizeSelect").value,
-  };
-  const key = $("geminiKey").value.trim();
-  if (key) patch.gemini_api_key = key;
+  const patch = { default_size: $("defSizeSelect").value };
   const btn = $("settingsSave");
   busy(btn, true, "저장 중…");
   try {
@@ -851,9 +837,6 @@ function wire() {
   $("settingsBtn").addEventListener("click", openSettings);
   $("settingsClose").addEventListener("click", () => ($("settingsModal").hidden = true));
   $("settingsSave").addEventListener("click", saveSettings);
-  $("engineSelect").addEventListener("change", (e) => {
-    $("geminiFields").hidden = e.target.value !== "gemini";
-  });
 
   // 로그인 / 계정변경 / 로그아웃 (새 cmd 창에서 codex 실행)
   $("loginBtn").addEventListener("click", async () => {

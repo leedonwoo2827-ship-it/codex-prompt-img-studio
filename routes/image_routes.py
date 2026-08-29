@@ -46,11 +46,10 @@ class ComposeReq(BaseModel):
 # ── 엔진 호출 래퍼 (예외 → HTTP) ──────────────────────────────────────────────
 async def _run_engine(prompt: str, size: str, refs: Optional[List[bytes]]):
     settings = load_settings()
-    engine = settings.get("engine", "codex")
     try:
         return await asyncio.to_thread(
             codex_image.generate_image, prompt,
-            size=size, refs=refs, engine=engine, settings=settings,
+            size=size, refs=refs, settings=settings,
         )
     except NotAuthenticated as e:
         raise HTTPException(401, str(e))

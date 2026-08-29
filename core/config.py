@@ -1,7 +1,7 @@
 """앱 설정 — data/settings.json 에 저장/로드.
 
-이미지 엔진 선택과 기본 생성 옵션을 담는다. codex(키리스) 가 기본이고, gemini(API 키)는
-선택적 대체 엔진이다. 키는 코드에 하드코딩하지 않고 사용자가 설정 화면/환경변수로 넣는다.
+기본 생성 옵션(크기·형식)을 담는다. 이미지 엔진은 codex(ChatGPT 구독, 키리스) 하나뿐이라
+엔진 선택 항목은 없다.
 """
 from __future__ import annotations
 
@@ -13,11 +13,8 @@ from core.atomic_io import atomic_write_json
 from core.constants import SETTINGS_PATH
 
 _DEFAULTS: Dict[str, Any] = {
-    "engine": "codex",          # "codex" (키리스) | "gemini" (API 키)
     "default_size": "auto",     # auto | 1024x1024 | 1536x1024 | 1024x1536
     "default_format": "png",    # png | jpeg | webp
-    "gemini_api_key": "",       # gemini 엔진을 쓸 때만
-    "gemini_model": "gemini-2.5-flash-image",
 }
 
 
@@ -31,9 +28,6 @@ def load_settings() -> Dict[str, Any]:
                 data.update({k: v for k, v in stored.items() if k in _DEFAULTS})
     except Exception:
         pass
-    # 환경변수 우선(있을 때만)
-    if os.environ.get("GEMINI_API_KEY"):
-        data["gemini_api_key"] = os.environ["GEMINI_API_KEY"].strip()
     return data
 
 

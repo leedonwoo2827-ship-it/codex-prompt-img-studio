@@ -8,7 +8,7 @@
 app.py                       # 통합 FastAPI 진입점 (단일 포트 8765, 단일 정적 마운트)
 core/                        # 경로/설정/DB (이미지 스튜디오 + 빌더 경로 통합)
   constants.py               # 경로·포트·이미지 사이즈 + 빌더 자산 경로(PROMPTS/PRESETS/ARCHIVES)
-  config.py                  # 엔진/기본옵션/Gemini 키 (data/settings.json)
+  config.py                  # 기본 생성 옵션 — 크기·형식 (data/settings.json)
   database.py                # SQLite (Project / Image / EditEvent)
   atomic_io.py               # 원자적 JSON 저장
 services/
@@ -49,8 +49,13 @@ data/                        # 런타임 (app.db · images/ · settings.json · 
 
 ## 엔진
 
-- 기본: **ChatGPT (gpt-image-2 이미지 / Codex 텍스트)** — 키리스
-- 대체: **Gemini** (`gemini-2.5-flash-image`) — 설정에서 API 키 입력 시 이미지 생성 대체. 할당량 절약·비교용.
+- **ChatGPT (Codex) 하나뿐입니다** — 키리스, 사용자의 구독 할당량으로 동작.
+  - 대체 엔진(Gemini)은 2026-08-29 제거했습니다. 쓰지 않는데 설정·UI·의존성(httpx)만
+    늘리고 있었고, 키가 없으면 어차피 동작하지 않았습니다.
+- **낼 수 있는 크기는 3종 + 자동뿐입니다** — `1024x1024`(1:1) · `1536x1024`(3:2) ·
+  `1024x1536`(2:3). `codex_image.CODEX_SIZES` 가 그 밖의 값을 미리 걸러 한국어로 알립니다.
+  - **16:9 는 못 냅니다.** 필요하면 3:2 로 받아 좌우에 배경색 띠를 덧대 1820×1024 로
+    만드는 후처리가 답입니다(자르지 않아 제목이 안 날아감). 현재 미구현.
 
 ## 프롬프트 큐 (보관함 → 스튜디오)
 

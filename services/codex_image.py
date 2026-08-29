@@ -5,8 +5,6 @@
 (gpt-5.5)이고 이미지는 `image_generation` 툴로 생성된다. API 키가 필요 없고 사용량은
 사용자의 ChatGPT 구독 한도에서 차감된다.
 
-대체 엔진 = **gemini (API 키)**: Google AI Studio 무료 키로 generativelanguage 호출.
-
 > 주의: codex/responses 는 Codex CLI 가 쓰는 내부(비공식) 엔드포인트다. 구글/오픈AI 의
 > 공개 SDK 가 아니므로 변경될 수 있다. 구현은 오픈소스 chatgpt-imagegen 의 검증된
 > 메커니즘(토큰 로드/갱신·헤더·페이로드·SSE 파싱)을 차용했다.
@@ -39,6 +37,18 @@ AUTH_PATH = Path(os.environ.get("CODEX_AUTH_PATH", str(Path.home() / ".codex" / 
 VERSION_PATH = Path.home() / ".codex" / "version.json"
 
 CODEX_MODEL = os.environ.get("CODEX_IMAGE_MODEL", "gpt-5.5")
+
+# image_generation 툴이 받는 크기. 이 밖의 값을 보내면 백엔드가 거절하는데,
+# 그 오류 문구가 불친절해서 여기서 미리 걸러 한국어로 알려준다.
+CODEX_SIZES = {"auto", "1024x1024", "1536x1024", "1024x1536"}
+
+# 배경을 불투명으로 못박는다. image_generation 툴의 background 기본값이 "auto" 라서
+# 모델이 그때그때 정하고, 간혹 알파(투명)로 비워 버린다. 투명 PNG 는 보는 쪽 배경색이
+# 그대로 비치므로 — 다크모드 탐색기, 어두운 PPT 마스터에서 글자가 배경에 묻힌다.
+# 프롬프트에 "바탕을 칠하라"를 적어도 알파로 비우면 그대로 통과하니 여기서 막아야 한다.
+# (2026-08-17 실측: 제21장 32장 중 003·014 두 장만 RGBA 로 나왔다.)
+# 잘라내기용 투명 PNG 가 필요하면 CODEX_IMAGE_BACKGROUND=transparent 로 돌린다.
+CODEX_BACKGROUND = os.environ.get("CODEX_IMAGE_BACKGROUND", "opaque")
 DEFAULT_TOTAL_TIMEOUT = int(os.environ.get("IMAGE_TIMEOUT", "300"))
 DEFAULT_STALL_TIMEOUT = 120.0
 REF_B64_SOFT_CAP = 8 * 1024 * 1024  # 참조 이미지 base64 상한(초과 시 경고만)
@@ -213,6 +223,8 @@ def _build_payload(prompt: str, size: str, output_format: str, model: str,
     user_text = _build_user_text(prompt, size, output_format, is_edit)
 
     image_tool: JsonDict = {"type": "image_generation", "output_format": output_format}
+    if CODEX_BACKGROUND:
+        image_tool["background"] = CODEX_BACKGROUND
     if size and size != "auto":
         image_tool["size"] = size
 
@@ -334,6 +346,11 @@ def _post_for_image(headers: dict, payload: JsonDict,
 # ── codex 엔진 진입점 (401 시 갱신 후 1회 재시도) ─────────────────────────────
 def _run_codex(prompt: str, size: str, output_format: str,
                refs: Optional[List[bytes]]) -> Tuple[bytes, JsonDict]:
+    if size and size not in CODEX_SIZES:
+        raise ImageEngineError(
+            f"ChatGPT 엔진은 {size} 크기를 만들 수 없습니다. "
+            "1024x1024 · 1536x1024 · 1024x1536 셋만 됩니다."
+        )
     auth = _load_auth()
     access, account_id, refresh = _extract_tokens(auth)
     if not access:
@@ -366,57 +383,16 @@ def _run_codex(prompt: str, size: str, output_format: str,
         raise
 
 
-# ── gemini 대체 엔진 (API 키) ────────────────────────────────────────────────
-def _run_gemini(prompt: str, size: str, refs: Optional[List[bytes]],
-                api_key: str, model: str) -> Tuple[bytes, JsonDict]:
-    if not api_key:
-        raise ImageEngineError("Gemini API 키가 설정되지 않았습니다. 설정에서 입력하세요.")
-    import httpx
-
-    parts: List[dict] = []
-    if refs:
-        for r in refs:
-            b64, mime = _encode_ref(r)
-            parts.append({"inline_data": {"mime_type": mime, "data": b64}})
-    parts.append({"text": prompt})
-    body = {
-        "contents": [{"parts": parts}],
-        "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
-    }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    try:
-        resp = httpx.post(url, json=body, headers={"x-goog-api-key": api_key},
-                          timeout=DEFAULT_TOTAL_TIMEOUT)
-    except Exception as e:
-        raise ImageEngineError(f"Gemini 네트워크 오류: {e}")
-    if resp.status_code != 200:
-        raise ImageEngineError(f"Gemini HTTP {resp.status_code}: {resp.text[:400]}",
-                               status=resp.status_code)
-    data = resp.json()
-    for cand in data.get("candidates", []):
-        for part in cand.get("content", {}).get("parts", []):
-            inline = part.get("inline_data") or part.get("inlineData")
-            if isinstance(inline, dict) and inline.get("data"):
-                return base64.b64decode(inline["data"]), {"model": model}
-    raise ImageEngineError("Gemini 응답에 이미지가 없습니다.")
-
-
 # ── 공개 API ──────────────────────────────────────────────────────────────────
 def generate_image(prompt: str, *, size: str = "auto",
                    refs: Optional[List[bytes]] = None,
-                   engine: str = "codex", settings: Optional[dict] = None) -> Tuple[bytes, dict]:
+                   settings: Optional[dict] = None) -> Tuple[bytes, dict]:
     """프롬프트(+ 선택 참조 이미지)로 이미지 1장을 생성/편집/병합한다.
 
     refs 가 있으면 편집/병합 경로(image-to-image). 반환: (png_bytes, meta).
     """
     settings = settings or {}
     output_format = settings.get("default_format", "png")
-    if engine == "gemini":
-        img, meta = _run_gemini(prompt, size, refs,
-                                 settings.get("gemini_api_key", ""),
-                                 settings.get("gemini_model", "gemini-2.5-flash-image"))
-        meta["engine"] = "gemini"
-        return img, meta
     img, meta = _run_codex(prompt, size, output_format, refs)
     meta["engine"] = "codex"
     meta["model"] = CODEX_MODEL

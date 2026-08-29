@@ -378,7 +378,7 @@ def _is_rate_limited(msg: str) -> bool:
             or "usage limit" in low or "quota" in low or "한도" in msg)
 
 
-async def _generate_one(job: BatchJob, item: dict, settings: dict, engine: str) -> None:
+async def _generate_one(job: BatchJob, item: dict, settings: dict) -> None:
     out_dir = Path(job.out_dir)
     fname = build_filename(item["n"], item["title"], job.ext, job.with_title)
     target = out_dir / fname
@@ -393,7 +393,7 @@ async def _generate_one(job: BatchJob, item: dict, settings: dict, engine: str) 
         try:
             data, meta = await asyncio.to_thread(
                 generate_image, item["prompt"],
-                size=job.size, refs=None, engine=engine, settings=settings,
+                size=job.size, refs=None, settings=settings,
             )
             await asyncio.to_thread(target.write_bytes, data)
             item["file"] = fname
@@ -434,7 +434,6 @@ async def _generate_one(job: BatchJob, item: dict, settings: dict, engine: str) 
 
 async def _run_job(job: BatchJob) -> None:
     settings = load_settings()
-    engine = settings.get("engine", "codex")
     sem = asyncio.Semaphore(job.workers)
 
     async def worker(item: dict) -> None:
@@ -443,7 +442,7 @@ async def _run_job(job: BatchJob) -> None:
                 if item["status"] == "pending":
                     item["status"] = "canceled"
                 return
-            await _generate_one(job, item, settings, engine)
+            await _generate_one(job, item, settings)
 
     try:
         targets = [it for it in job.items if it["status"] == "pending"]
