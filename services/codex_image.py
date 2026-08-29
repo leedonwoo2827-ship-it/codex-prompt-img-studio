@@ -1,9 +1,11 @@
 """이미지 엔진 — 생성 / 편집 / 병합.
 
 주 엔진 = **codex (키리스)**: `~/.codex/auth.json` 의 ChatGPT OAuth 토큰으로
-`https://chatgpt.com/backend-api/codex/responses` 에 직접 POST 한다. 모델은 추론 모델
-(gpt-5.5)이고 이미지는 `image_generation` 툴로 생성된다. API 키가 필요 없고 사용량은
-사용자의 ChatGPT 구독 한도에서 차감된다.
+`https://chatgpt.com/backend-api/codex/responses` 에 직접 POST 한다. 요청에 싣는 모델은
+**추론 모델(gpt-5.5)**이고, 그림은 그 안의 `image_generation` 툴이 만든다. 툴이 쓰는
+이미지 모델은 **gpt-image-2** — 응답에는 이름이 안 실리지만 OpenAI 문서에 이미지 생성
+모델이 그것뿐이고 동작(16의 배수·1:3~3:1·최대 4K)도 일치한다.
+API 키가 필요 없고 사용량은 사용자의 ChatGPT 구독 한도에서 차감된다.
 
 > 주의: codex/responses 는 Codex CLI 가 쓰는 내부(비공식) 엔드포인트다. 구글/오픈AI 의
 > 공개 SDK 가 아니므로 변경될 수 있다. 구현은 오픈소스 chatgpt-imagegen 의 검증된
@@ -38,9 +40,23 @@ VERSION_PATH = Path.home() / ".codex" / "version.json"
 
 CODEX_MODEL = os.environ.get("CODEX_IMAGE_MODEL", "gpt-5.5")
 
-# image_generation 툴이 받는 크기. 이 밖의 값을 보내면 백엔드가 거절하는데,
-# 그 오류 문구가 불친절해서 여기서 미리 걸러 한국어로 알려준다.
-CODEX_SIZES = {"auto", "1024x1024", "1536x1024", "1024x1536"}
+# image_generation 툴이 받는 크기 규칙(공식 문서 기준).
+#   · 가로·세로 모두 **16의 배수**
+#   · 비율은 **1:3 ~ 3:1** 사이
+#   · 최대 3840x2160 (2560x1440 초과는 실험적)
+#
+# 예전에 이 파일은 "1024x1024 · 1536x1024 · 1024x1536 셋뿐"으로 알고 막아 뒀는데,
+# 그건 구형 gpt-image-1 기준이라 지금 모델에는 맞지 않는다. 그 탓에 16:9 를 고르면
+# 조용히 3:2 로 바뀌어 나갔다.
+#
+# 2026-08-29 실측 — 16:9·9:16·4:3·21:9 모두 그대로 생성됐다:
+#     1536x864  요청 → 1672x941   (16:9)
+#     864x1536  요청 → 941x1672   (9:16)
+#     1408x1056 요청 → 1448x1086  (4:3)
+#     1536x656  요청 → 1918x820   (21:9)
+# 보다시피 **비율은 지키지만 해상도는 백엔드가 자기 기준으로 다시 잡는다.**
+# size 는 정확한 픽셀 지정이 아니라 사실상 비율 지정에 가깝다.
+CODEX_MAX_W, CODEX_MAX_H = 3840, 2160
 
 # 배경을 불투명으로 못박는다. image_generation 툴의 background 기본값이 "auto" 라서
 # 모델이 그때그때 정하고, 간혹 알파(투명)로 비워 버린다. 투명 PNG 는 보는 쪽 배경색이
@@ -343,14 +359,27 @@ def _post_for_image(headers: dict, payload: JsonDict,
         raise ImageEngineError("백엔드가 잘못된 base64 를 반환했습니다.")
 
 
+def _check_size(size: str) -> None:
+    """보내기 전에 크기 규칙을 확인한다 — 백엔드 오류 문구가 불친절해서."""
+    if not size or size == "auto":
+        return
+    m = re.fullmatch(r"(\d+)\s*[xX]\s*(\d+)", size.strip())
+    if not m:
+        raise ImageEngineError(f"크기 형식이 잘못됐습니다: {size} (예: 1536x1024)")
+    w, h = int(m.group(1)), int(m.group(2))
+    if w % 16 or h % 16:
+        raise ImageEngineError(f"{size} — 가로·세로 모두 16의 배수여야 합니다.")
+    if not (1 / 3) <= (w / h) <= 3:
+        raise ImageEngineError(f"{size} — 비율은 1:3 에서 3:1 사이여야 합니다.")
+    if w > CODEX_MAX_W or h > CODEX_MAX_H:
+        raise ImageEngineError(
+            f"{size} — 최대 {CODEX_MAX_W}x{CODEX_MAX_H} 까지입니다.")
+
+
 # ── codex 엔진 진입점 (401 시 갱신 후 1회 재시도) ─────────────────────────────
 def _run_codex(prompt: str, size: str, output_format: str,
                refs: Optional[List[bytes]]) -> Tuple[bytes, JsonDict]:
-    if size and size not in CODEX_SIZES:
-        raise ImageEngineError(
-            f"ChatGPT 엔진은 {size} 크기를 만들 수 없습니다. "
-            "1024x1024 · 1536x1024 · 1024x1536 셋만 됩니다."
-        )
+    _check_size(size)
     auth = _load_auth()
     access, account_id, refresh = _extract_tokens(auth)
     if not access:
