@@ -250,10 +250,11 @@ def _build_payload(prompt: str, size: str, output_format: str, model: str,
             for (b64, mime) in refs
         ]
         content.append({"type": "input_text", "text": user_text})
-        tool_choice = "required"
     else:
         content = [{"type": "input_text", "text": user_text}]
-        tool_choice = "auto"
+    # 툴 호출을 강제한다. "auto" 면 기획서처럼 긴 프롬프트(헤드라인·보조문구·사이즈 권장…)를
+    # 정리 요청으로 받아들여 그림 없이 글로만 답하고 끝나는 경우가 있다.
+    tool_choice = "required"
 
     return {
         "model": model,
@@ -321,6 +322,7 @@ def _post_for_image(headers: dict, payload: JsonDict,
     item_meta: JsonDict = {}
     seen: dict = {}
     failure_detail: Optional[str] = None
+    text_parts: List[str] = []
     try:
         for evt in _stream(headers, payload, deadline, stall_timeout):
             t = evt.get("type", "?")
@@ -334,6 +336,8 @@ def _post_for_image(headers: dict, payload: JsonDict,
                 if isinstance(evt.get("error"), dict):
                     detail = evt["error"].get("message") or detail
                 failure_detail = str(detail or evt.get("message") or evt.get("code") or "")
+            if t == "response.output_text.delta" and isinstance(evt.get("delta"), str):
+                text_parts.append(evt["delta"])
             if t == "response.output_item.done":
                 item = evt.get("item")
                 if isinstance(item, dict) and item.get("type") == "image_generation_call":
@@ -352,6 +356,11 @@ def _post_for_image(headers: dict, payload: JsonDict,
         types_seen = ", ".join(sorted(seen)) or "(none)"
         if failure_detail:
             raise ImageEngineError(f"생성 실패: {failure_detail} (events: {types_seen})")
+        said = " ".join("".join(text_parts).split())
+        if said:
+            # 모델이 그림 대신 글로 답한 경우 — 거절·되묻기인지 사용자가 바로 볼 수 있게.
+            raise ImageEngineError(
+                f"이미지 대신 글로 응답했습니다: \"{said[:200]}\" — 프롬프트를 조정해 다시 시도하세요.")
         raise ImageEngineError(f"이미지가 반환되지 않았습니다. (events: {types_seen})")
     try:
         return base64.b64decode(image_b64, validate=True), item_meta
