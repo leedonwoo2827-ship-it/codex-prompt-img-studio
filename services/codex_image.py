@@ -105,6 +105,19 @@ def _extract_tokens(auth: JsonDict) -> Tuple[Optional[str], Optional[str], Optio
     return access, account_id, refresh
 
 
+def _plan_type(auth: JsonDict) -> Optional[str]:
+    """id_token 의 chatgpt_plan_type(free/plus/pro/team…) — 진단 메시지용, 실패하면 None."""
+    try:
+        token = auth["tokens"]["id_token"]
+        part = token.split(".")[1]
+        part += "=" * (-len(part) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(part))
+        plan = claims.get("https://api.openai.com/auth", {}).get("chatgpt_plan_type")
+        return plan if isinstance(plan, str) else None
+    except Exception:
+        return None
+
+
 def _refresh_access_token(refresh_token: str, timeout: int = 30) -> JsonDict:
     data = urllib.parse.urlencode({
         "client_id": OAUTH_CLIENT_ID,
@@ -252,8 +265,8 @@ def _build_payload(prompt: str, size: str, output_format: str, model: str,
         content.append({"type": "input_text", "text": user_text})
     else:
         content = [{"type": "input_text", "text": user_text}]
-    # 툴 호출을 강제한다. "auto" 면 기획서처럼 긴 프롬프트(헤드라인·보조문구·사이즈 권장…)를
-    # 정리 요청으로 받아들여 그림 없이 글로만 답하고 끝나는 경우가 있다.
+    # 툴 호출을 강제한다. "auto" 면 이미지 툴을 못 쓰는 계정(무료 요금제 등)에서 모델이
+    # 글로만 답하고 끝나 원인이 안 보였다. "required" 면 400 으로 바로 드러난다(_run_codex 참고).
     tool_choice = "required"
 
     return {
@@ -418,6 +431,15 @@ def _run_codex(prompt: str, size: str, output_format: str,
             if isinstance(new_access, str) and new_access:
                 _persist_refreshed_auth(auth, refreshed)
                 return _attempt(new_access)
+        # 계정에 image_generation 툴 권한이 없으면 백엔드가 툴을 빼 버려서
+        # "Tool choice 'required' must be specified with 'tools'" 400 이 난다.
+        if e.status == 400 and "Tool choice 'required'" in str(e):
+            plan = _plan_type(auth) or "알 수 없음"
+            raise ImageEngineError(
+                f"로그인한 ChatGPT 계정(요금제: {plan})에서 이미지 생성 기능을 쓸 수 없습니다. "
+                "유료 개인 요금제(Plus/Pro) 계정으로 `codex login` 을 다시 해 주세요. "
+                "팀·기업 계정이면 관리자가 이미지 생성을 막아 둔 경우일 수 있습니다.",
+                status=400)
         raise
 
 
